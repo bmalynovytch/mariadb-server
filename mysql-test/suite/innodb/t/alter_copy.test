@@ -8,7 +8,6 @@
 --echo #            ALTER TABLE...ALGORITHM=COPY
 --echo #
 
-SET NAMES utf8;
 CREATE TABLE t(a SERIAL, b INT, c INT, d INT) ENGINE=InnoDB;
 CREATE TABLE t1(a INT, b TEXT, c TEXT,
                FULLTEXT(b), FULLTEXT(c(3)), FULLTEXT(b,c)) ENGINE=InnoDB;
@@ -32,9 +31,9 @@ INSERT INTO t1 VALUES(2, 'This is a second b column', 'This is a second c column
 INSERT INTO t1(a) VALUES(3);
 INSERT INTO t1 VALUES(4, 'This is a third b column', 'This is a third c column');
 DELETE FROM t1 WHERE a = 2;
-SELECT * FROM t1 WHERE MATCH(b) AGAINST ("first");
-SELECT * FROM t1 WHERE MATCH(c) AGAINST ("first");
-SELECT * FROM t1 WHERE MATCH(b,c) AGAINST ("column");
+SELECT * FROM t1 WHERE MATCH(b) AGAINST ('first');
+SELECT * FROM t1 WHERE MATCH(c) AGAINST ('first');
+SELECT * FROM t1 WHERE MATCH(b,c) AGAINST ('column');
 SHOW CREATE TABLE t1;
 ALTER TABLE t1 FORCE, ALGORITHM=COPY;
 
@@ -57,41 +56,35 @@ ALTER TABLE t ADD INDEX(b,c,d,a),ADD INDEX(b,c,a,d),ADD INDEX(b,a,c,d),ADD INDEX
 --let $restart_parameters= --innodb-force-recovery=3
 --source include/start_mysqld.inc
 let $datadir=`select @@datadir`;
---replace_regex /#sql-[0-9a-f_]*/#sql-nnnn_nnnn/i
+--replace_regex /#sql-[0-9a-f_]*/#sql-temporary/ /FTS_[0-9a-f]*_[0-9a-f]*/FTS/
 --list_files $datadir/test
 SHOW CREATE TABLE t;
 SELECT COUNT(*) FROM t;
 CHECK TABLE t;
-SELECT * FROM t1 WHERE MATCH(b) AGAINST ("first");
-SELECT * FROM t1 WHERE MATCH(c) AGAINST ("first");
-SELECT * FROM t1 WHERE MATCH(b,c) AGAINST ("column");
+SELECT * FROM t1 WHERE MATCH(b) AGAINST ('first');
+SELECT * FROM t1 WHERE MATCH(c) AGAINST ('first');
+SELECT * FROM t1 WHERE MATCH(b,c) AGAINST ('column');
 SHOW CREATE TABLE t1;
 CHECK TABLE t1;
 
 --let $restart_parameters= --innodb-read-only
 --source include/restart_mysqld.inc
-let $datadir=`select @@datadir`;
---replace_regex /#sql-[0-9a-f_]*/#sql-nnnn_nnnn/i
+--replace_regex /#sql-[0-9a-f_]*/#sql-temporary/ /FTS_[0-9a-f]*_[0-9a-f]*/FTS/
 --list_files $datadir/test
 SHOW CREATE TABLE t;
 SELECT COUNT(*) FROM t;
 CHECK TABLE t;
-SELECT * FROM t1 WHERE MATCH(b) AGAINST ("first");
-SELECT * FROM t1 WHERE MATCH(c) AGAINST ("first");
-SELECT * FROM t1 WHERE MATCH(b,c) AGAINST ("column");
+SELECT * FROM t1 WHERE MATCH(b) AGAINST ('first');
+SELECT * FROM t1 WHERE MATCH(c) AGAINST ('first');
+SELECT * FROM t1 WHERE MATCH(b,c) AGAINST ('column');
 SHOW CREATE TABLE t1;
 CHECK TABLE t1;
 
 --let $restart_parameters=
 --source include/restart_mysqld.inc
-let $datadir=`select @@datadir`;
---replace_regex /#sql-[0-9a-f_]*/#sql-nnnn_nnnn/i
+--replace_regex /#sql-[0-9a-f_]*/#sql-temporary/ /FTS_[0-9a-f]*_[0-9a-f]*/FTS/
 --list_files $datadir/test
-DROP TABLE t1;
-DROP TABLE t;
+DROP TABLE t1,t;
 
---disable_query_log
---disable_result_log
---remove_files_wildcard $datadir/test #sql*
---enable_result_log
---enable_query_log
+# Work around missing crash recovery at the SQL layer.
+--remove_files_wildcard $datadir/test #sql-*.frm
