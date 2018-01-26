@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2012, Oracle and/or its affiliates.
-   Copyright (c) 1995, 2017, MariaDB Corporation.
+   Copyright (c) 1995, 2018, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -209,14 +209,12 @@ enum ha_extra_function {
     that we are starting an ordered index scan. Needed by Spider
   */
   HA_EXTRA_STARTING_ORDERED_INDEX_SCAN,
-  /*
-    Begin of insertion into intermediate table during copy alter operation.
-  */
+  /** Start writing rows during ALTER TABLE...ALGORITHM=COPY. */
   HA_EXTRA_BEGIN_ALTER_COPY,
-  /*
-    Insertion is done in intermediate table during copy alter operation.
-  */
-  HA_EXTRA_END_ALTER_COPY
+  /** Finish writing rows during ALTER TABLE...ALGORITHM=COPY. */
+  HA_EXTRA_END_ALTER_COPY,
+  /** Fake the start of a statement after wsrep_load_data_splitting hack */
+  HA_EXTRA_FAKE_START_STMT
 };
 
 /* Compatible option, to be deleted in 6.0 */

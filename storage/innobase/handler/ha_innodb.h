@@ -436,9 +436,6 @@ public:
 	/* An helper function for index_cond_func_innodb: */
 	bool is_thd_killed();
 
-	row_prebuilt_t* get_prebuilt()
-	{return m_prebuilt;}
-
 protected:
 
 	/**

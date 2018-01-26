@@ -185,7 +185,7 @@ static mysql_mutex_t pending_checkpoint_mutex;
 
 #define EQ_CURRENT_THD(thd) ((thd) == current_thd)
 
-static struct handlerton* innodb_hton_ptr;
+struct handlerton* innodb_hton_ptr;
 
 static const long AUTOINC_OLD_STYLE_LOCKING = 0;
 static const long AUTOINC_NEW_STYLE_LOCKING = 1;
@@ -477,10 +477,6 @@ innobase_fts_find_ranking(
 	FT_INFO*	fts_hdl,
 	uchar*,
 	uint);
-
-static inline
-void
-trx_register_for_2pc(trx_t*  trx);
 
 /* Call back function array defined by MySQL and used to
 retrieve FTS results. */
@@ -1907,77 +1903,6 @@ thd_to_trx_id(
 	THD*	thd)	/*!< in: MySQL thread */
 {
 	return(thd_to_trx(thd)->id);
-}
-
-typedef struct Pair
-{
-	row_prebuilt_t *prebuilt;
-	enum lock_mode	mode;
-} Pair;
-
-/********************************************************************//**
-Intermediate commit for splitting large LOAD DATA commands into more 
-manageable units.*/
-void
-wsrep_load_data_spliting_commit(handler** handlers, uint size, THD* thd)
-{
-	DBUG_ENTER("wsrep_load_data_spliting_commit");
-
-	trx_t* trx = thd_to_trx(thd);
-	if (!wsrep_load_data_splitting || !trx_is_started(trx) || !wsrep_on(thd)
-	    || thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)) {
-		DBUG_VOID_RETURN;
-	}
-
-	TrxInInnoDB	trx_in_innodb(trx);
-	if (trx_in_innodb.is_aborted()) {
-		DBUG_VOID_RETURN;
-	}
-
-	enum wsrep_trx_status status;
-	handlerton* innodb_hton = handlers[0]->ht;
-	Pair* array = static_cast<Pair*>(ut_malloc_nokey(
-					(size + 1) * sizeof(Pair)));
-	WSREP_DEBUG("forced trx split for LOAD: %s", wsrep_thd_query(thd));
-	if (array == NULL) {
-		DBUG_VOID_RETURN;
-	}
-	memset(array, 0x00, (size + 1) * sizeof(Pair));
-	for (uint idx = 0; idx < size; idx++)
-	{
-		ha_innobase* innobase_file = static_cast<ha_innobase*>(handlers[idx]);
-                row_prebuilt_t* prebuilt = innobase_file->get_prebuilt();
-		enum lock_mode  mode;
-
-		DBUG_ASSERT(trx == prebuilt->trx);
-		if (lock_get_dest_lock_mode(trx, prebuilt->table, &mode)) {
-			array[idx].prebuilt = prebuilt;
-			array[idx].mode = mode;
-		}
-	}
-	
-	status = wsrep_run_wsrep_commit(thd, 1);
-	if (status != WSREP_TRX_OK) {
-		ut_free(array);
-		DBUG_VOID_RETURN;
-	}
-	if (binlog_hton->commit(binlog_hton, thd, 1)) {
-		ut_free(array);
-		DBUG_VOID_RETURN;
-	}
-	wsrep_post_commit(thd, TRUE);
-	innobase_commit(innodb_hton, thd, 1);
-	trx_register_for_2pc(trx);
-	for (uint idx = 0; idx < size; idx++) {
-		if (array[idx].prebuilt == NULL) {
-			continue;
-		}
-		row_lock_table_for_mysql(array[idx].prebuilt,
-					 array[idx].prebuilt->table, array[idx].mode);
-	}
-	ut_free(array);
-
-	DBUG_VOID_RETURN;
 }
 #endif /* WITH_WSREP */
 
@@ -15707,6 +15632,10 @@ ha_innobase::extra(
 		break;
 	case HA_EXTRA_END_ALTER_COPY:
 		m_prebuilt->table->skip_alter_undo = 0;
+		break;
+	case HA_EXTRA_FAKE_START_STMT:
+		trx_register_for_2pc(m_prebuilt->trx);
+		m_prebuilt->sql_stat_start = true;
 		break;
 	default:/* Do nothing */
 		;
