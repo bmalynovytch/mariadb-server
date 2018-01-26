@@ -15629,6 +15629,16 @@ ha_innobase::extra(
 		break;
 	case HA_EXTRA_BEGIN_ALTER_COPY:
 		m_prebuilt->table->skip_alter_undo = 1;
+		if (m_prebuilt->table->is_temporary()
+		    || !m_prebuilt->table->id_versioned()) {
+			break;
+		}
+		trx_start_if_not_started(m_prebuilt->trx, true);
+		m_prebuilt->trx->mod_tables.insert(
+			trx_mod_tables_t::value_type(
+				const_cast<dict_table_t*>(m_prebuilt->table),
+				0))
+			.first->second.set_versioned(0);
 		break;
 	case HA_EXTRA_END_ALTER_COPY:
 		m_prebuilt->table->skip_alter_undo = 0;
