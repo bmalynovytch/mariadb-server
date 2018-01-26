@@ -8196,7 +8196,7 @@ ha_innobase::write_row(
 			DB_FORCED_ABORT, 0, m_user_thd));
 	}
 
-	/* Step-1: Validation checks before we commence write_row operation. */
+	/* Validation checks before we commence write_row operation. */
 	if (high_level_read_only) {
 		ib_senderrf(ha_thd(), IB_LOG_LEVEL_WARN, ER_READ_ONLY_MODE);
 		DBUG_RETURN(HA_ERR_TABLE_READONLY);
@@ -8217,7 +8217,7 @@ ha_innobase::write_row(
 		++trx->will_lock;
 	}
 
-	/* Step-2: Handling of Auto-Increment Columns. */
+	/* Handling of Auto-Increment Columns. */
 	if (table->next_number_field && record == table->record[0]) {
 
 		/* Reset the error code before calling
@@ -8250,7 +8250,7 @@ ha_innobase::write_row(
 		auto_inc_used = true;
 	}
 
-	/* Step-3: Prepare INSERT graph that will be executed for actual INSERT
+	/* Prepare INSERT graph that will be executed for actual INSERT
 	(This is a one time operation) */
 	if (m_prebuilt->mysql_template == NULL
 	    || m_prebuilt->template_type != ROW_MYSQL_WHOLE_ROW) {
@@ -8266,12 +8266,12 @@ ha_innobase::write_row(
 	vers_set_fields = table->versioned_write(VERS_TRX_ID) ?
 		ROW_INS_VERSIONED : ROW_INS_NORMAL;
 
-	/* Step-4: Execute insert graph that will result in actual insert. */
+	/* Execute insert graph that will result in actual insert. */
 	error = row_insert_for_mysql((byte*) record, m_prebuilt, vers_set_fields);
 
 	DEBUG_SYNC(m_user_thd, "ib_after_row_insert");
 
-	/* Step-5: Handling of errors related to auto-increment. */
+	/* Handling of errors related to auto-increment. */
 	if (auto_inc_used) {
 		ulonglong	auto_inc;
 		ulonglong	col_max_value;
@@ -8392,7 +8392,7 @@ set_max_autoinc:
 	innobase_srv_conc_exit_innodb(m_prebuilt);
 
 report_error:
-	/* Step-6: Cleanup and exit. */
+	/* Cleanup and exit. */
 	if (error == DB_TABLESPACE_DELETED) {
 		ib_senderrf(
 			trx->mysql_thd, IB_LOG_LEVEL_ERROR,
