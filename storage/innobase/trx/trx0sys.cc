@@ -91,19 +91,32 @@ uint	trx_rseg_n_slots_debug = 0;
 
 
 /**
-  Writes the value of m_max_trx_id to the file based trx system header.
+  Writes the value of m_max_trx_id to the file based trx system header
+
+  m_max_trx_id flushing is triggered whenever its value becomes divisible by
+  TRX_SYS_TRX_ID_WRITE_MARGIN.
+
+  Since m_max_trx_id increment and flushing its value is not atomic, it may
+  happen so that least recent value is requested to be flushed after most
+  recent value. To workaround this we always flush the most recent value.
+
+  E.g. if three threads are willing to flush values of 256, 512, 768, we don't
+  want to allow flushing to happen in 768, 512, 256 order, instead we flush
+  768, 768, 768.
 */
 
 void trx_sys_t::flush_max_trx_id()
 {
-  ut_ad(trx_sys.mutex.is_owned());
   if (!srv_read_only_mode)
   {
     mtr_t mtr;
+    mutex_enter(&mutex);
     mtr.start();
     mlog_write_ull(trx_sysf_get(&mtr) + TRX_SYS_TRX_ID_STORE,
-                   trx_sys.get_max_trx_id(), &mtr);
+                   get_max_trx_id() / TRX_SYS_TRX_ID_WRITE_MARGIN *
+                   TRX_SYS_TRX_ID_WRITE_MARGIN, &mtr);
     mtr.commit();
+    mutex_exit(&mutex);
   }
 }
 
