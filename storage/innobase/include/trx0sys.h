@@ -404,6 +404,7 @@ struct rw_trx_hash_element_t
 
 
   trx_id_t id; /* lf_hash_init() relies on this to be first in the struct */
+  trx_id_t no;
   trx_t *trx;
   ib_mutex_t mutex;
 };
@@ -494,6 +495,7 @@ class rw_trx_hash_t
     ut_ad(element->trx == 0);
     element->trx= trx;
     element->id= trx->id;
+    element->no= TRX_ID_MAX;
     trx->rw_trx_hash_element= element;
   }
 
@@ -830,10 +832,6 @@ public:
 	MY_ALIGNED(CACHE_LINE_SIZE)
 	MVCC		mvcc;		/*!< Multi version concurrency control
 					manager */
-	trx_ut_list_t	serialisation_list;
-					/*!< Ordered on trx_t::no of all the
-					currenrtly active RW transactions */
-
 	MY_ALIGNED(CACHE_LINE_SIZE)
 	trx_ut_list_t	mysql_trx_list;	/*!< List of transactions created
 					for MySQL. All user transactions are
@@ -926,16 +924,49 @@ public:
     Thus trx id values will not overlap when the database is
     repeatedly started!
 
-    @param[in] locked   to be removed along with serialisation_list
-
     @return new, allocated trx id
   */
 
-  trx_id_t get_new_trx_id(bool locked= false)
+  trx_id_t get_new_trx_id()
   {
-    trx_id_t id= get_new_trx_id_no_refresh(locked);
+    trx_id_t id= get_new_trx_id_no_flush();
+    flush_max_trx_id_if_needed(id);
+    return id;
+  }
+
+
+  /**
+    Allocates new transaction id without flushing it.
+
+    This method is extracted for exclusive use by trx_serialise().
+
+    @sa get_new_trx_id()
+
+    @return new transaction id
+  */
+
+  trx_id_t get_new_trx_id_no_flush()
+  {
+    trx_id_t id= get_new_trx_id_no_refresh();
     refresh_rw_trx_hash_version();
-    return(id);
+    return id;
+  }
+
+
+  /**
+    Calls flush_max_trx_id() if needed.
+
+    This method is extracted for exclusive use by trx_serialise().
+
+    @sa get_new_trx_id()
+
+    @return new transaction id
+  */
+
+  void flush_max_trx_id_if_needed(trx_id_t id)
+  {
+    if (UNIV_UNLIKELY(!(id % TRX_SYS_TRX_ID_WRITE_MARGIN)))
+      flush_max_trx_id();
   }
 
 
@@ -958,22 +989,27 @@ public:
     @param[in,out] caller_trx used to get access to rw_trx_hash_pins
     @param[out]    ids        array to store registered transaction identifiers
     @param[out]    max_trx_id variable to store m_max_trx_id value
+    @param[out]    mix_trx_no variable to store min(trx->no) value
   */
 
-  void snapshot_ids(trx_t *caller_trx, trx_ids_t *ids, trx_id_t *max_trx_id)
+  void snapshot_ids(trx_t *caller_trx, trx_ids_t *ids, trx_id_t *max_trx_id,
+                    trx_id_t *min_trx_no)
   {
     snapshot_ids_arg arg(ids);
 
     while ((arg.m_id= get_rw_trx_hash_version()) != get_max_trx_id())
       ut_delay(1);
+    arg.m_no= arg.m_id;
 
     ids->clear();
     ids->reserve(rw_trx_hash.size() + 32);
-    *max_trx_id= arg.m_id;
     rw_trx_hash.iterate(caller_trx,
                         reinterpret_cast<my_hash_walk_action>(copy_one_id),
                         &arg);
     std::sort(ids->begin(), ids->end());
+
+    *max_trx_id= arg.m_id;
+    *min_trx_no= arg.m_no;
   }
 
 
@@ -1019,12 +1055,10 @@ public:
 
   void register_rw(trx_t *trx)
   {
-    trx->id= get_new_trx_id_no_refresh(true);
+    trx->id= get_new_trx_id_no_refresh();
     rw_trx_hash.insert(trx);
     refresh_rw_trx_hash_version();
-    /* To be removed along with serialisation_list. */
-    if (UNIV_UNLIKELY(!(trx->id % TRX_SYS_TRX_ID_WRITE_MARGIN)))
-      flush_max_trx_id();
+    flush_max_trx_id_if_needed(trx->id);
   }
 
 
@@ -1074,6 +1108,7 @@ private:
     snapshot_ids_arg(trx_ids_t *ids): m_ids(ids) {}
     trx_ids_t *m_ids;
     trx_id_t m_id;
+    trx_id_t m_no;
   };
 
 
@@ -1081,7 +1116,13 @@ private:
                              snapshot_ids_arg *arg)
   {
     if (element->id < arg->m_id)
+    {
+      trx_id_t no= static_cast<trx_id_t>(my_atomic_load64_explicit(
+        reinterpret_cast<int64*>(&element->no), MY_MEMORY_ORDER_RELAXED));
       arg->m_ids->push_back(element->id);
+      if (no < arg->m_no)
+        arg->m_no= no;
+    }
     return 0;
   }
 
@@ -1113,24 +1154,16 @@ private:
 
     @sa get_new_trx_id()
 
-    @param[in] locked   to be removed along with serialisation_list
-
     @return new transaction id
   */
 
-  trx_id_t get_new_trx_id_no_refresh(bool locked)
+  trx_id_t get_new_trx_id_no_refresh()
   {
-    trx_id_t id= static_cast<trx_id_t>(my_atomic_add64_explicit(
+    return static_cast<trx_id_t>(my_atomic_add64_explicit(
       reinterpret_cast<int64*>(&m_max_trx_id), 1, MY_MEMORY_ORDER_RELAXED));
-
-    if (!locked && UNIV_UNLIKELY(!(id % TRX_SYS_TRX_ID_WRITE_MARGIN)))
-      flush_max_trx_id();
-    return id;
   }
 
 
-  /* To be removed along with serialisation_list. */
-public:
   /**
     Writes the value of m_max_trx_id to the file based trx system header.
   */
